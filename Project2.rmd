@@ -5,8 +5,10 @@ date: "2025-11-11"
 output: word_document
 ---
 
+<https://github.com/joannehwang/Project2>
+
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE, message = FALSE)
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, dpi = 300)
 
 # load libraries
 library(tidyverse)
@@ -14,107 +16,139 @@ library(RColorBrewer)
 ```
 
 ```{r}
-#create a function to format datasets 
+# create a function to format datasets
 format_data <- function(dataset) {
-  
-  #rename columns 
-  dataset <- rename(dataset, 
-                    date = `Date`,
-                    max_CO = `Daily Max 8-hour CO Concentration`,
-                    mean_PM = `Daily Mean PM2.5 Concentration`,
-                    max_O3 = `Daily Max 8-hour Ozone Concentration`)
-  
-  #format date variable 
+  # rename columns
+  dataset <- rename(dataset,
+    date = `Date`,
+    max_CO = `Daily Max 8-hour CO Concentration`,
+    mean_PM = `Daily Mean PM2.5 Concentration`,
+    max_O3 = `Daily Max 8-hour Ozone Concentration`
+  )
+
+  # format date variable
   dataset$date <- mdy(dataset$date)
-  
-  #calculate the daily average for days with multiple measurements 
-  dataset <- dataset %>% 
-    group_by(date) %>% 
-    summarise(max_CO = mean(max_CO, na.rm = TRUE),
-              units_CO = units_CO,
-              mean_PM = mean(mean_PM, na.rm = TRUE),
-              units_PM = units_PM,
-              max_O3 = mean(max_O3, na.rm = TRUE),
-              units_O3 = units_O3) %>% 
-    ungroup() #should also remove any duplicate rows 
-  
-  #fix measurement error issues 
-  pollutants <- c("max_CO", "mean_PM", "max_O3") #vector of pollutants 
-  
-  for (i in pollutants) { #loop through each of the pollutants 
-    dataset[[i]][dataset[[i]] < 0] <- 0 #set any negative values to 0 
+
+  # calculate the daily average for days with multiple measurements
+  dataset <- dataset %>%
+    group_by(date) %>%
+    summarise(
+      max_CO = mean(max_CO, na.rm = TRUE),
+      units_CO = units_CO,
+      mean_PM = mean(mean_PM, na.rm = TRUE),
+      units_PM = units_PM,
+      max_O3 = mean(max_O3, na.rm = TRUE),
+      units_O3 = units_O3
+    ) %>%
+    ungroup() # should also remove any duplicate rows
+
+  # fix measurement error issues
+  pollutants <- c("max_CO", "mean_PM", "max_O3") # vector of pollutants
+
+  for (i in pollutants) { # loop through each of the pollutants
+    dataset[[i]][dataset[[i]] < 0] <- 0 # set any negative values to 0
   }
-  
   return(dataset)
 }
 ```
 
 ```{r}
-#load in datasets 
+# load in datasets
 data_2018 <- read_csv("data/AQ_2018.csv")
 data_2019 <- read_csv("data/AQ_2019.csv")
 data_2020 <- read_csv("data/AQ_2020.csv")
 
-#use the function to format the 3 datasets 
+# use the function to format the 3 datasets
 data_2018 <- format_data(data_2018)
 data_2019 <- format_data(data_2019)
 data_2020 <- format_data(data_2020)
 
-#combine all datasets
+# combine all datasets
 formatted_data <- rbind(data_2018, data_2019, data_2020)
 ```
 
 ```{r}
-#data for plot 1 
+# edit data for plot 1
 plot1_df <- formatted_data
-plot1_df$month <- as.numeric(format(plot1_df$date, "%m")) #create a new column for month 
+plot1_df$month <- as.numeric(format(plot1_df$date, "%m")) # column for month
+plot1_df$month <- factor(plot1_df$month,
+  labels = c(
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+  )
+)
 
-plot1_df <- plot1_df %>% 
-  group_by(month) %>% 
-  summarise(avg_max_CO = mean(max_CO, na.rm = TRUE),
-            n_CO = sum(!is.na(max_CO)),
-            se_CO = sd(max_CO, na.rm = TRUE) / n_CO,
-            moe_CO = se_CO * qt(0.975, df = n_CO - 1),
-            avg_max_O3 = mean(max_O3, na.rm = TRUE),
-            n_O3 = sum(!is.na(max_O3)),
-            se_O3 = sd(max_O3, na.rm = TRUE) / n_O3,
-            moe_O3 = se_O3 * qt(0.975, df = n_O3 - 1)) %>% 
+# calculate mean and margin or error for each pollutant
+plot1_df <- plot1_df %>%
+  group_by(month) %>%
+  summarise(
+    mean_CO = mean(max_CO, na.rm = TRUE),
+    n_CO = sum(!is.na(max_CO)),
+    se_CO = sd(max_CO, na.rm = TRUE) / sqrt(n_CO),
+    moe_CO = 1.96 * se_CO,
+    mean_O3 = mean(max_O3, na.rm = TRUE),
+    n_O3 = sum(!is.na(max_O3)),
+    se_O3 = sd(max_O3, na.rm = TRUE) / sqrt(n_O3),
+    moe_O3 = 1.96 * se_O3
+  ) %>%
   ungroup()
 
-plot1_df <- plot1_df %>% 
-  select(month, avg_max_CO, moe_CO, avg_max_O3, moe_O3) %>% 
-  pivot_longer(cols = c(avg_max_CO, avg_max_O3), 
-               names_to = "pollutant", 
-               values_to = "mean_value") %>% 
-  pivot_longer(cols = c(moe_CO, moe_O3),
-               values_to = "moe")
+# turn into long data
+plot1_df <- plot1_df %>%
+  select(month, mean_CO, moe_CO, mean_O3, moe_O3) %>%
+  pivot_longer(
+    cols = c(mean_CO, moe_CO, mean_O3, moe_O3),
+    names_to = c(".value", "pollutant"), # left = values, right = pollutant
+    names_sep = "_"
+  )
 
-ggplot(plot1_df, aes(x = month, y = mean_value, color = pollutant)) +
-  geom_point(size = 1) + 
-  geom_errorbar(aes(ymin = mean_value - moe, ymax = mean_value + moe), width = 0.15, alpha = 0.5) +
-  scale_color_brewer(palette = "Set1", labels = c("CO", "O3")) +
-  labs(x = "Month", y = "Average Concentration (ppm)", color = "Pollutant") +
-  theme_minimal()
+ggplot(plot1_df, aes(x = month, y = mean, color = pollutant, group = pollutant)) +
+  geom_point(size = 1) +
+  geom_errorbar(aes(ymin = mean - moe, ymax = mean + moe), width = 0.15, alpha = 0.5) +
+  scale_color_brewer(palette = "Set1") +
+  labs(
+    title = "Average CO and O3 Concentration by Month",
+    x = "Month",
+    y = "Average Concentration (ppm)",
+    color = "Pollutant"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
 ```
 
 ```{r}
-#data for plot 2 
+# edit data for plot 2
 plot2_df <- formatted_data
-plot2_df$month <- as.numeric(format(plot2_df$date, "%m")) #create a new column for month 
-plot2_df$year <- as.numeric(format(plot2_df$date, "%Y")) #create a new column for year 
-plot2_df$year <- as_factor(plot2_df$year) #change year to a factor to have distinct colors 
+plot2_df$month <- as.numeric(format(plot2_df$date, "%m")) # column for month
+plot2_df$year <- as.numeric(format(plot2_df$date, "%Y")) # column for year
 
-plot2_df <- plot2_df %>% 
-  group_by(month, year) %>% 
-  summarise(avg_PM = mean(mean_PM, na.rm = TRUE)) %>% 
-  ungroup() %>% 
+# turn month and year into factors
+plot2_df$month <- factor(plot2_df$month,
+  labels = c(
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+  )
+)
+plot2_df$year <- factor(plot2_df$year)
+
+# calculate average PM for each month and year
+plot2_df <- plot2_df %>%
+  group_by(month, year) %>%
+  summarise(avg_PM = mean(mean_PM, na.rm = TRUE)) %>%
+  ungroup() %>%
   select(month, year, avg_PM)
 
 ggplot(plot2_df, aes(x = month, y = avg_PM, color = year, group = year)) +
   geom_point() +
   geom_line() +
-  scale_color_brewer(palette = "Set1") +
-  labs(x = "Month", y = "Average PM2.5 (ug/m3 LC)", color = "Year") +
-  theme_minimal()
+  scale_fill_brewer(palette = "Set1") +
+  facet_wrap(~year, nrow = 3) + # facet by year
+  labs(
+    title = "Average PM2.5 by Month and Year",
+    x = "Month",
+    y = "Average PM2.5 (ug/m3 LC)",
+    color = "Year"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none") # legend is redundant since we are faceting
 ```
-
